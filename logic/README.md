@@ -26,7 +26,7 @@ Para que estes algoritmos funcionem, as perguntas que vêm do teu Agente de Cura
 
 ---
 
-## Como Usar nos Agentes (Instruções para Pessoa B)
+## Como Usar nos Agentes (Instruções para o Tomé)
  
 ### 1. Gerar um Quiz Otimizado (Agente de Avaliação)
 Use a classe `QuizCSP` quando o usuário pedir um teste.
