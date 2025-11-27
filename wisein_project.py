@@ -36,7 +36,7 @@ except ImportError:
 #CONFIGURAÇÃO DE ACESSO E MODELO
 
 #Chave inserida diretamente no código (mudar isto eventualmente)
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = ""
 
 CLIENT_CONFIG = {
     "model": "meta-llama/llama-3.3-70b-instruct:free",
