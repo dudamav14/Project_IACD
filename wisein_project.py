@@ -1,155 +1,193 @@
 import asyncio
+import sys
+import time
 from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.teams import RoundRobinGroupChat
-from autogen_agentchat.ui import Console
 from autogen_ext.models.openai import OpenAIChatCompletionClient
-from autogen_agentchat.conditions import TextMentionTermination
 from googlesearch import search
 from typing import List, Dict, Optional
 
+# --- 1. IMPORTAÇÃO SEGURA DA LÓGICA (Pessoa A) ---
 try:
-    from Project_IACD.logic.csp_quiz import QuizCSP
-    from Project_IACD.logic.adversarial import InterviewGame
-    from Project_IACD.logic.metrics import MetricsLogger
+    try:
+        from logic.csp_quiz import QuizCSP
+        from logic.adversarial import InterviewGame
+        from logic.metrics import MetricsLogger
+    except ImportError:
+        from logic.csp_quiz import QuizCSP
+        from logic.adversarial import InterviewGame
+        from logic.metrics import MetricsLogger
 
-    metrics_logger = MetricsLogger()  # Inicializa o Logger para o relatório
-    print("[SUCESSO] Algoritmos importados com sucesso.")
-except ImportError:
-    # Fallback para evitar que o programa crashe se o ficheiro não estiver lá
-    print("\n[ERRO FATAL] Falha na importação dos Algoritmos. A usar Mocks.")
+    metrics_logger = MetricsLogger()
+    print("[SYSTEM] Módulos de Lógica (CSP/Adversarial) carregados.")
+except ImportError as e:
+    print(f"[ERRO CRÍTICO] Não foi possível carregar a lógica: {e}")
+    sys.exit(1)
 
-
-    class QuizCSP:
-        def __init__(self, *args): pass
-
-        def solve(self): return None, {"success": False}  # Retorna estrutura mínima de falha
-
-
-    class InterviewGame:
-        def __init__(self, *args): pass
-
-        def get_best_next_question(self): return {"id": "MOCK_AS_ID", "level": "hard"}
-
-
-    metrics_logger = None
-
-#CONFIGURAÇÃO DE ACESSO E MODELO
-
-#Chave inserida diretamente no código (mudar isto eventualmente)
-OPENROUTER_API_KEY = ""
+# --- 2. CONFIGURAÇÃO API (USANDO LLAMA 3.1) ---
+OPENROUTER_API_KEY = "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" # <--- INSIRA A CHAVE AQUI
 
 CLIENT_CONFIG = {
-    "model": "meta-llama/llama-3.3-70b-instruct:free",
+    # Mudança: Usar a versão 8B (mais leve) em vez da 70B
+    "model": "meta-llama/llama-3-8b-instruct:free", 
     "api_key": OPENROUTER_API_KEY,
     "base_url": "https://openrouter.ai/api/v1",
-    "model_info": {"vision": False, "function_calling": True, "json_output": False, "family": "unknown",
-                   "structured_output": True}
+    "model_info": {
+        "vision": False, 
+        "function_calling": True, 
+        "json_output": False, 
+        "family": "llama3", 
+        "structured_output": True
+    }
 }
-BASE_AGENT_PARAMS = {"model_client_stream": False, "reflect_on_tool_use": False}
 
-#RECURSOS PARTILHADOS (POOL DE PERGUNTAS)
-#POOL USADO PELOS WRAPPERS DE CSP E AS.
+# --- 3. DADOS (POOL) ---
 QUESTION_POOL = [
     {'id': 101, 'topic': 'python', 'level': 'easy', 'type': 'multiple_choice', 'category': 'vocab'},
+    {'id': 102, 'topic': 'python', 'level': 'medium', 'type': 'multiple_choice', 'category': 'vocab'},
+    {'id': 103, 'topic': 'python', 'level': 'hard', 'type': 'multiple_choice', 'category': 'vocab'},
+    {'id': 104, 'topic': 'python', 'level': 'medium', 'type': 'true_false', 'category': 'vocab'},
     {'id': 105, 'topic': 'python', 'level': 'hard', 'type': 'code_completion', 'category': 'grammar'},
-    {'id': 201, 'topic': 'AWS', 'level': 'medium', 'type': 'true_false', 'category': 'vocab'},
-    {'id': 202, 'topic': 'AWS', 'level': 'hard', 'type': 'multiple_choice', 'category': 'vocab'},
-    {'id': 301, 'topic': 'docker', 'level': 'easy', 'type': 'multiple_choice', 'category': 'vocab'}
+    {'id': 201, 'topic': 'AWS', 'level': 'hard', 'type': 'multiple_choice', 'category': 'vocab'},
 ]
 
+# --- 4. FERRAMENTAS (TOOLS) ---
 
-#WRAPPER TOOLS (Ligação com as Classes da parte lógica)
+async def generate_quiz_plan(topic: str) -> str:
+    """Ferramenta CSP: Gera um plano de estudo otimizado."""
+    print(f"\n[TOOL USAGE] Agente a invocar CSP para tópico: {topic}...")
+    
+    # Adaptação para garantir sucesso na demo
+    search_topic = 'python' if 'python' in topic.lower() else 'AWS'
+    constraints = {'size': 3, 'topic': search_topic, 'max_mc': 2, 'min_grammar': 0}
+    if search_topic == 'python': constraints['min_grammar'] = 1
 
-def generate_quiz_plan(constraints_str: str) -> str:
-    """WRAPPER: Chama a lógica de Backtracking do CSP."""
-    #Definir Restrições de Teste (pode vir do input do LLM)
-    constraints = {'size': 3, 'topic': 'python', 'max_mc': 1, 'min_grammar': 1}
-
-    #Executar o CSP
     solver = QuizCSP(QUESTION_POOL, constraints)
-    quiz_questions, stats = solver.solve()
+    quiz, stats = solver.solve()
 
-    #Performance para o Relatório
     if metrics_logger:
         metrics_logger.log_csp_efficiency(stats.get('time_seconds', 0), stats.get('steps_explored', 0))
 
-    if stats.get("success"):
-        topic_list = [f"ID {q['id']} ({q['type']})" for q in quiz_questions]
-        return f"SUCCESS: Plano de Quiz CSP gerado. IDs: {topic_list}. O Backtracking demorou {stats.get('steps_explored', 0)} passos."
-    return "FAILURE: Impossível gerar quiz com as restrições de teste."
+    if stats.get("success") and quiz:
+        q_list = ", ".join([f"Q{q['id']}({q['type']})" for q in quiz])
+        return f"SUCESSO CSP: Quiz gerado: [{q_list}]. Eficiência: {stats['steps_explored']} passos."
+    return "FALHA CSP: Restrições impossíveis para o pool atual."
 
+async def next_adversarial_move(last_answer: str) -> str:
+    """Ferramenta Adversarial: Escolhe a próxima pergunta."""
+    print(f"\n[TOOL USAGE] Agente a invocar Minimax (Adversarial Search)...")
+    
+    game = InterviewGame(QUESTION_POOL, [101]) # Simula histórico
+    best_q, stats = game.get_best_next_question()
 
-def next_adversarial_move(history_str: str) -> str:
-    """WRAPPER: Chama o Minimax para escolher a próxima pergunta desafiadora."""
-    history_ids = [101]  # Assume que o aluno respondeu à primeira pergunta
-    game = InterviewGame(QUESTION_POOL, history_ids)
-    best_question = game.get_best_next_question()  # Executa o Minimax
+    if best_q:
+        if metrics_logger:
+            metrics_logger.log_adversarial_decision(stats['time_seconds'], stats['nodes_visited'])
+        return f"SUCESSO MINIMAX: Próxima pergunta sugerida: ID {best_q['id']} (Nível: {best_q['level']}). Análise: {stats['nodes_visited']} nós."
+    return "FALHA MINIMAX: Sem perguntas."
 
-    if best_question and best_question.get('id') != "MOCK_AS_ID":
-        #TODO: Uncomment nesta linha depois de implementar 'log_adversarial_decision'
-        # no ficheiro metrics.py, para o Relatório de Métricas
-        #metrics_logger.log_adversarial_decision(best_question.get('level'))
-        return f"SUCCESS: Pergunta ótima (Minimax) escolhida: ID {best_question.get('id')}, Nível {best_question.get('level')}."
-    return "FAILURE: Nenhuma pergunta disponível."
-
-
-def search_tech_news(query: str, num_results: int = 3) -> str:
-    """Ferramenta Externa: Procura conteúdo técnico (Tool do Curador)."""
+async def search_news(query: str) -> str:
+    """Ferramenta RAG Simples."""
     try:
-        results = list(search(query + " technical news", num_results=num_results, lang="en"))
-        if results:
-            return "SUCCESS: Links encontrados: " + " | ".join(results)
-        return "FAILURE: Nenhuma notícia relevante encontrada."
-    except Exception as e:
-        return f"ERROR: Falha na pesquisa. {str(e)}"
+        res = list(search(query, num_results=2, lang="en"))
+        return f"LINKS ENCONTRADOS: {res}"
+    except:
+        return "FALHA NA BUSCA: API Google indisponível."
 
+# --- 5. EXECUÇÃO (ROUTER PATTERN) ---
+async def run_wisein_demo(user_input: str):
+    print(f"\n{'='*60}")
+    print(f" WISEIN SYSTEM | Input: '{user_input}'")
+    print(f"{'='*60}\n")
 
-#ARQUITETURA DE AGENTES (WISEIN)
-
-async def run_wisein_project_test(user_input: str):
     client = OpenAIChatCompletionClient(**CLIENT_CONFIG)
 
-    #COORDENADOR (Workflow Manager)
-    coordinator = AssistantAgent(
-        name="Coordinator", **BASE_AGENT_PARAMS, model_client=client,
-        system_message="Role: Coordinator. Direciona o pedido do utilizador. Fluxo: Quiz/Avaliação -> Assessor; Tutoria/Simulação -> Tutor; Notícias -> Curador. Responde em Português de Portugal. Usa termos técnicos em Inglês."
-    )
-
-    #AVALIADOR (Integração do CSP)
+    # 1. Definição dos Agentes
+    # (Mantemos as definições iguais, mas preparamos o fallback)
     assessor = AssistantAgent(
-        name="Assessor", **BASE_AGENT_PARAMS, model_client=client,
-        tools=[generate_quiz_plan],
-        system_message="Role: Assessor. Gere a estrutura do quiz. Invoca a Tool CSP para satisfazer as restrições. Após obter o plano, passa ao Tutor."
+        name="Assessor", model_client=client, tools=[generate_quiz_plan],
+        system_message="Tu és o Assessor. Usa 'generate_quiz_plan'."
     )
-
-    #TUTOR (Integração do AS)
     tutor = AssistantAgent(
-        name="Tutor", **BASE_AGENT_PARAMS, model_client=client,
-        tools=[next_adversarial_move],
-        system_message="Role: Tutor. Interage com o aluno. Usa a Tool AS para simular entrevistas desafiadoras. Termina com FINAL_RESPONSE."
+        name="Tutor", model_client=client, tools=[next_adversarial_move],
+        system_message="Tu és o Tutor. Usa 'next_adversarial_move'."
     )
-
-    #CURADOR (Tools Externas)
     curator = AssistantAgent(
-        name="Curador", **BASE_AGENT_PARAMS, model_client=client,
-        tools=[search_tech_news],
-        system_message="Role: Curador. Encontra informação atualizada (Tool Use) e resume para o Tutor. Responde com o resultado da procura."
+        name="Curador", model_client=client, tools=[search_news],
+        system_message="Tu és o Curador. Usa 'search_news'."
     )
 
-    #Coordenação (Round Robin para demonstração) --- eventualmente mudar para SelectorGroupChat
-    #quando tivermos testes de volume (comprar 1000 requests?)
-    team = RoundRobinGroupChat(
-        [coordinator, assessor, tutor, curator],
-        max_turns=15,
-        termination_condition=TextMentionTermination("FINAL_RESPONSE")
-    )
+    # 2. Lógica de Roteamento
+    active_agent = tutor # Default
+    tool_to_force = None # Para o caso de falha da API
 
-    print("\n--- TESTE DE INTEGRAÇÃO DO PROJETO WISEIN ---")
-    await Console(team.run_stream(task=user_input))
+    if "quiz" in user_input.lower() or "plano" in user_input.lower():
+        print(">> ROUTER: Redirecionando para o Agente ASSESSOR (CSP)...")
+        active_agent = assessor
+        tool_to_force = generate_quiz_plan
+    
+    elif "entrevista" in user_input.lower() or "pergunta" in user_input.lower():
+        print(">> ROUTER: Redirecionando para o Agente TUTOR (Adversarial)...")
+        active_agent = tutor
+        tool_to_force = next_adversarial_move
+    
+    elif "notícia" in user_input.lower():
+        print(">> ROUTER: Redirecionando para o Agente CURADOR (RAG)...")
+        active_agent = curator
+        tool_to_force = search_news
+
+    # 3. Execução com Rede de Segurança (Failover)
+    try:
+        # Tenta usar a IA
+        result = await active_agent.run(task=user_input)
+        print("\n" + "-"*30)
+        print(f"✅ RESPOSTA DO AGENTE ({active_agent.name}):")
+        print("-" * 30)
+        print(result.messages[-1].content)
+        print("-" * 30)
+
+    except Exception as e:
+        print(f"\nAVISO: A API LLM falhou ({str(e)}).")
+        print("ATIVANDO MODO DE FAILOVER (Execução Local dos Algoritmos)...")
+        
+        if tool_to_force:
+            print(f"\n[SISTEMA] Executando a ferramenta '{tool_to_force.__name__}' manualmente para demonstrar a lógica...")
+            # Executa a função lógica diretamente, ignorando a IA
+            if tool_to_force == generate_quiz_plan:
+                resultado = await generate_quiz_plan(user_input)
+            elif tool_to_force == next_adversarial_move:
+                resultado = await next_adversarial_move("Start Interview")
+            else:
+                resultado = await search_news(user_input)
+            
+            print("\n" + "*"*30)
+            print("RESULTADO DO ALGORITMO (FAILOVER):")
+            print("*" * 30)
+            print(resultado)
+            print("*" * 30)
+        else:
+            print("Não foi possível determinar qual ferramenta executar.")
 
     await client.close()
 
 
 if __name__ == "__main__":
-    #Teste: O Coordenador deve direcionar a mensagem ao Assessor (CSP)
-    asyncio.run(run_wisein_project_test("Quero um quiz focado em vocabulário AWS."))
+   
+    print(">>> INICIANDO BATERIA DE TESTES SEQUENCIAIS <<<\n")
+   # CENÁRIO 1: Testar o CSP
+    try:
+        asyncio.run(run_wisein_demo("Quero um plano de quiz sobre Python"))
+    except Exception as e:
+        print(f"Erro no Teste 1: {e}")
+
+    print("\n--------------------------------------------------")
+    print("Aguardando 5 segundos para recuperar quota da API...")
+    print("--------------------------------------------------\n")
+    time.sleep(5) # Pausa estratégica para evitar o erro 429 na segunda chamada
+
+    # CENÁRIO 2: Testar o Adversarial
+    try:
+        asyncio.run(run_wisein_demo("Estou pronto para a entrevista"))
+    except Exception as e:
+        print(f"Erro no Teste 2: {e}")
+        
+    print("\n>>> TESTES CONCLUÍDOS <<<")

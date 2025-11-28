@@ -1,0 +1,6 @@
+streamlit
+autogen-agentchat
+autogen-ext
+openai
+tiktoken
+googlesearch-python

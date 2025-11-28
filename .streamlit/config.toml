@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#205474"        # Azul Petróleo 
+backgroundColor = "#FFFFFF"     # Branco
+secondaryBackgroundColor = "#F0F6F9" # Azulzinho muito claro
+textColor = "#171717"           # Preto 
+font = "sans serif"
