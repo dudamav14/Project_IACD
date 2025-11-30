@@ -44,9 +44,6 @@ class QuizCSP:
         return True
     
     def solve(self) -> Tuple[Optional[List[Dict]], Dict[str, Any]]:
-        """
-        Retorna uma tupla: (solucao, metadados)
-        """
         start_time = time.time()
         self.steps_count = 0 
         

@@ -4,18 +4,11 @@ from typing import List, Dict, Optional, Any, Tuple
 
 class InterviewGame:
     def __init__(self, available_questions: List[Dict[str, Any]], history: List[int]):
-        """
-        :param available_questions: Lista de dicts (o pool de perguntas vindo do RAG/Banco).
-        :param history: Lista de IDs de perguntas que JÁ foram feitas.
-        """
         self.questions = available_questions
         self.history = history
         self.nodes_visited = 0  
 
     def utility_function(self, question: Dict, simulated_student_performance: float) -> float:
-        """
-        Calcula a utilidade. Defensivo contra chaves em falta.
-        """
         level = question.get('level', 'medium')
         
         level_value = 5
@@ -30,9 +23,6 @@ class InterviewGame:
         return [q for q in self.questions if q['id'] not in self.history]
 
     def minimax(self, depth: int, is_maximizing_player: bool, current_question: Optional[Dict] = None) -> Any:
-        """
-        Minimax com contagem de nós visitados.
-        """
         self.nodes_visited += 1  
         
         possible_moves = self.get_possible_moves()
@@ -68,10 +58,6 @@ class InterviewGame:
             return self.minimax(depth - 1, True, current_question)
 
     def get_best_next_question(self) -> Tuple[Optional[Dict], Dict[str, Any]]:
-        
-        """
-        Retorna a melhor pergunta E as estatísticas de execução.
-        """
         start_time = time.time()
         self.nodes_visited = 0
         

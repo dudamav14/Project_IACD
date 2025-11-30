@@ -6,7 +6,6 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 from googlesearch import search
 from typing import List, Dict, Optional
 
-# --- 1. IMPORTAÇÃO SEGURA DA LÓGICA (Pessoa A) ---
 try:
     try:
         from logic.csp_quiz import QuizCSP
@@ -23,24 +22,22 @@ except ImportError as e:
     print(f"[ERRO CRÍTICO] Não foi possível carregar a lógica: {e}")
     sys.exit(1)
 
-# --- 2. CONFIGURAÇÃO API (USANDO LLAMA 3.1) ---
-OPENROUTER_API_KEY = "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" # <--- INSIRA A CHAVE AQUI
+OPENROUTER_API_KEY = " " # <--- INSERE A CHAVE AQUI
 
 CLIENT_CONFIG = {
-    # Mudança: Usar a versão 8B (mais leve) em vez da 70B
-    "model": "meta-llama/llama-3-8b-instruct:free", 
+    "model": "openai/gpt-4o-mini",
     "api_key": OPENROUTER_API_KEY,
     "base_url": "https://openrouter.ai/api/v1",
     "model_info": {
         "vision": False, 
         "function_calling": True, 
         "json_output": False, 
-        "family": "llama3", 
+        "family": "gpt-4", 
         "structured_output": True
     }
 }
 
-# --- 3. DADOS (POOL) ---
+
 QUESTION_POOL = [
     {'id': 101, 'topic': 'python', 'level': 'easy', 'type': 'multiple_choice', 'category': 'vocab'},
     {'id': 102, 'topic': 'python', 'level': 'medium', 'type': 'multiple_choice', 'category': 'vocab'},
@@ -50,13 +47,12 @@ QUESTION_POOL = [
     {'id': 201, 'topic': 'AWS', 'level': 'hard', 'type': 'multiple_choice', 'category': 'vocab'},
 ]
 
-# --- 4. FERRAMENTAS (TOOLS) ---
+
 
 async def generate_quiz_plan(topic: str) -> str:
     """Ferramenta CSP: Gera um plano de estudo otimizado."""
     print(f"\n[TOOL USAGE] Agente a invocar CSP para tópico: {topic}...")
     
-    # Adaptação para garantir sucesso na demo
     search_topic = 'python' if 'python' in topic.lower() else 'AWS'
     constraints = {'size': 3, 'topic': search_topic, 'max_mc': 2, 'min_grammar': 0}
     if search_topic == 'python': constraints['min_grammar'] = 1
@@ -93,7 +89,6 @@ async def search_news(query: str) -> str:
     except:
         return "FALHA NA BUSCA: API Google indisponível."
 
-# --- 5. EXECUÇÃO (ROUTER PATTERN) ---
 async def run_wisein_demo(user_input: str):
     print(f"\n{'='*60}")
     print(f" WISEIN SYSTEM | Input: '{user_input}'")
@@ -101,8 +96,6 @@ async def run_wisein_demo(user_input: str):
 
     client = OpenAIChatCompletionClient(**CLIENT_CONFIG)
 
-    # 1. Definição dos Agentes
-    # (Mantemos as definições iguais, mas preparamos o fallback)
     assessor = AssistantAgent(
         name="Assessor", model_client=client, tools=[generate_quiz_plan],
         system_message="Tu és o Assessor. Usa 'generate_quiz_plan'."
@@ -116,9 +109,8 @@ async def run_wisein_demo(user_input: str):
         system_message="Tu és o Curador. Usa 'search_news'."
     )
 
-    # 2. Lógica de Roteamento
-    active_agent = tutor # Default
-    tool_to_force = None # Para o caso de falha da API
+    active_agent = tutor 
+    tool_to_force = None
 
     if "quiz" in user_input.lower() or "plano" in user_input.lower():
         print(">> ROUTER: Redirecionando para o Agente ASSESSOR (CSP)...")
@@ -135,12 +127,10 @@ async def run_wisein_demo(user_input: str):
         active_agent = curator
         tool_to_force = search_news
 
-    # 3. Execução com Rede de Segurança (Failover)
     try:
-        # Tenta usar a IA
         result = await active_agent.run(task=user_input)
         print("\n" + "-"*30)
-        print(f"✅ RESPOSTA DO AGENTE ({active_agent.name}):")
+        print(f"RESPOSTA DO AGENTE ({active_agent.name}):")
         print("-" * 30)
         print(result.messages[-1].content)
         print("-" * 30)
@@ -151,7 +141,6 @@ async def run_wisein_demo(user_input: str):
         
         if tool_to_force:
             print(f"\n[SISTEMA] Executando a ferramenta '{tool_to_force.__name__}' manualmente para demonstrar a lógica...")
-            # Executa a função lógica diretamente, ignorando a IA
             if tool_to_force == generate_quiz_plan:
                 resultado = await generate_quiz_plan(user_input)
             elif tool_to_force == next_adversarial_move:
@@ -171,23 +160,19 @@ async def run_wisein_demo(user_input: str):
 
 
 if __name__ == "__main__":
-   
-    print(">>> INICIANDO BATERIA DE TESTES SEQUENCIAIS <<<\n")
-   # CENÁRIO 1: Testar o CSP
     try:
         asyncio.run(run_wisein_demo("Quero um plano de quiz sobre Python"))
     except Exception as e:
         print(f"Erro no Teste 1: {e}")
 
     print("\n--------------------------------------------------")
-    print("Aguardando 5 segundos para recuperar quota da API...")
+    print("Aguardando 5 segundos para recuperar a API...")
     print("--------------------------------------------------\n")
-    time.sleep(5) # Pausa estratégica para evitar o erro 429 na segunda chamada
+    time.sleep(5) 
 
-    # CENÁRIO 2: Testar o Adversarial
+    
     try:
         asyncio.run(run_wisein_demo("Estou pronto para a entrevista"))
     except Exception as e:
         print(f"Erro no Teste 2: {e}")
-        
-    print("\n>>> TESTES CONCLUÍDOS <<<")
+    

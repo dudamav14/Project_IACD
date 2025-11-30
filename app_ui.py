@@ -1,5 +1,6 @@
 import streamlit as st
 import asyncio
+import json
 import time
 import os
 import sys
@@ -7,9 +8,6 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from googlesearch import search
 
-# ==============================================================================
-# 1. CONFIGURAÇÃO VISUAL
-# ==============================================================================
 st.set_page_config(page_title="WiseIn", page_icon="logo.png", layout="wide")
 
 st.markdown("""
@@ -21,55 +19,65 @@ st.markdown("""
     .stChatInputContainer { padding-bottom: 20px; padding-top: 10px; background-color: white; }
     .stChatInput textarea { background-color: #F8F9FA; border: 1px solid #D1D5DB; border-radius: 25px; font-size: 16px; }
     h1, h2, h3 { color: #205474; font-family: 'Helvetica', sans-serif; }
+    
+    .question-box {
+        background-color: #E3F2FD;
+        border-left: 5px solid #205474;
+        padding: 15px;
+        border-radius: 5px;
+        margin-top: 10px;
+        font-weight: 500;
+        color: #0D47A1;
+    }
+    
+    .algo-tag {
+        font-size: 0.8em;
+        background-color: #eee;
+        padding: 2px 8px;
+        border-radius: 10px;
+        color: #555;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# ==============================================================================
-# 2. IMPORTAÇÃO SEGURA & LOGGING
-# ==============================================================================
 def log_to_terminal(message):
-    """Força a escrita no CMD para o professor ver."""
     print(f"\n[BACKEND LOG] {message}")
     sys.stdout.flush()
 
 try:
-    try:
-        from logic.csp_quiz import QuizCSP
-        from logic.adversarial import InterviewGame
-        from logic.metrics import MetricsLogger
-    except ImportError:
-        from logic.csp_quiz import QuizCSP
-        from logic.adversarial import InterviewGame
-        from logic.metrics import MetricsLogger
-    
-    log_to_terminal("Módulos de Lógica (CSP/Adversarial) carregados com sucesso.")
+    from logic.csp_quiz import QuizCSP
+    from logic.adversarial import InterviewGame
+    from logic.metrics import MetricsLogger
     metrics_logger = MetricsLogger()
 except ImportError:
     st.error("Erro: Pasta de lógica não encontrada.")
     st.stop()
 
-# ==============================================================================
-# 3. CONFIGURAÇÃO API & DADOS
-# ==============================================================================
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = "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" # <--- INSERE A CHAVE AQUI
 
 CLIENT_CONFIG = {
-    "model": "meta-llama/llama-3-8b-instruct:free",
+    "model": "openai/gpt-4o-mini",
     "api_key": OPENROUTER_API_KEY,
     "base_url": "https://openrouter.ai/api/v1",
-    "model_info": {"vision": False, "function_calling": True, "json_output": False, "family": "llama3", "structured_output": True}
+    "model_info": {
+        "vision": False, 
+        "function_calling": True, 
+        "json_output": False, 
+        "family": "gpt-4", 
+        "structured_output": True
+    }
 }
 
-MOCK_KNOWLEDGE_BASE = {
-    101: {"q": "Qual keyword define uma função em Python?", "a": "def", "ok": " **Correto!** `def` inicia funções.", "nok": " **Errado.** É `def`."},
-    102: {"q": "Listas são mutáveis ou imutáveis?", "a": "mutáveis", "ok": " **Certo!** Listas mudam.", "nok": " **Errado.** Elas são mutáveis."},
-    103: {"q": "O que é o GIL?", "a": "global interpreter lock", "ok": " **Exato!**", "nok": " Global Interpreter Lock."},
-    104: {"q": "Python é compilado estaticamente? (Sim/Não)", "a": "não", "ok": " **Certo**, é dinâmico.", "nok": " **Errado**."},
-    105: {"q": "Complete: `___ : try code` ... `except:`", "a": "try", "ok": " **Perfeito**.", "nok": " É `try`."},
-    201: {"q": "Serviço Serverless da AWS?", "a": "lambda", "ok": " **Correto**.", "nok": " É o Lambda."}
+STATIC_KNOWLEDGE = {
+    101: {"q": "Qual keyword define uma função em Python?", "a": "def", "ok": "Correto!", "nok": "Errado. É 'def'."},
+    102: {"q": "Listas são mutáveis ou imutáveis?", "a": "mutáveis", "ok": "Certo!", "nok": "Errado."},
+    103: {"q": "O que é o GIL?", "a": "global interpreter lock", "ok": "Exato!", "nok": "Global Interpreter Lock."},
+    104: {"q": "Python é compilado estaticamente?", "a": "não", "ok": "Certo.", "nok": "Errado."},
+    105: {"q": "Complete: `___ : try code` ... `except:`", "a": "try", "ok": "Perfeito.", "nok": "É 'try'."},
+    201: {"q": "Serviço Serverless da AWS?", "a": "lambda", "ok": "Correto.", "nok": "É o Lambda."}
 }
 
-QUESTION_POOL = [
+STATIC_POOL = [
     {'id': 101, 'topic': 'python', 'level': 'easy', 'type': 'multiple_choice', 'category': 'vocab'},
     {'id': 102, 'topic': 'python', 'level': 'medium', 'type': 'multiple_choice', 'category': 'vocab'},
     {'id': 103, 'topic': 'python', 'level': 'hard', 'type': 'multiple_choice', 'category': 'vocab'},
@@ -78,178 +86,299 @@ QUESTION_POOL = [
     {'id': 201, 'topic': 'AWS', 'level': 'hard', 'type': 'multiple_choice', 'category': 'vocab'},
 ]
 
-# ==============================================================================
-# 4. FUNÇÕES LÓGICAS (WRAPPERS COM LOGS)
-# ==============================================================================
+if "DB_PERGUNTAS" not in st.session_state:
+    st.session_state.DB_PERGUNTAS = STATIC_KNOWLEDGE.copy()
+if "POOL_ATUAL" not in st.session_state:
+    st.session_state.POOL_ATUAL = STATIC_POOL.copy()
+
+
+async def fetch_new_questions(topic):
+    client = OpenAIChatCompletionClient(**CLIENT_CONFIG)
+    log_to_terminal(f"Tentando gerar perguntas novas sobre '{topic}' via IA...")
+    
+    prompt = f"""
+    Create a technical quiz with 5 questions about '{topic}'.
+    Return ONLY a raw JSON list. No markdown formatting (no ```json), no intro text.
+    
+    Structure per item:
+    {{
+        "id": 900,
+        "topic": "{topic}",
+        "level": "easy", 
+        "type": "multiple_choice",
+        "category": "vocab",
+        "q": "Question text here?\\na) Option 1\\nb) Option 2",
+        "a": "keyword",
+        "ok": "Positive feedback",
+        "nok": "Negative feedback"
+    }}
+    Make sure to include 5 distinct items with IDs starting from 900.
+    """
+    try:
+        agent = AssistantAgent(name="Generator", model_client=client)
+        result = await agent.run(task=prompt)
+        
+        content = result.messages[-1].content
+        content = content.replace("```json", "").replace("```", "").strip()
+        
+        start = content.find("[")
+        end = content.rfind("]") + 1
+        if start != -1 and end != -1:
+            content = content[start:end]
+            
+        data = json.loads(content)
+        
+        new_pool = []
+        for i, item in enumerate(data):
+            
+            unique_id = int(time.time()) + i 
+            
+            q_type = item.get('type', 'multiple_choice')
+            q_level = item.get('level', 'medium')
+            
+            new_pool.append({
+                'id': unique_id, 
+                'topic': topic, 
+                'level': q_level, 
+                'type': q_type, 
+                'category': item.get('category', 'vocab')
+            })
+            
+            st.session_state.DB_PERGUNTAS[unique_id] = {
+                'q': item.get('q', 'Erro no texto'), 
+                'a': item.get('a', ''), 
+                'ok': item.get('ok', 'Correto!'), 
+                'nok': item.get('nok', 'Incorreto.')
+            }
+        
+        st.session_state.POOL_ATUAL.extend(new_pool)
+        log_to_terminal(f"Sucesso! {len(new_pool)} perguntas de '{topic}' adicionadas.")
+        return True
+    
+    except Exception as e:
+        log_to_terminal(f"Erro na geração JSON: {e}")
+        return False
+
 
 async def generate_quiz_plan(topic: str) -> str:
-    log_to_terminal(f"Iniciando Algoritmo CSP para tópico: '{topic}'")
-    
-    search_topic = 'python' if 'python' in topic.lower() else 'AWS'
-    constraints = {'size': 3, 'topic': search_topic, 'max_mc': 2, 'min_grammar': 0}
-    if search_topic == 'python': constraints['min_grammar'] = 1
 
-    solver = QuizCSP(QUESTION_POOL, constraints)
+    await fetch_new_questions(topic)
+    
+    found_topic = False
+    for q in st.session_state.POOL_ATUAL:
+        if topic.lower() in q['topic'].lower():
+            found_topic = True
+            break
+            
+    search_topic = topic if found_topic else 'python'
+    
+    if search_topic == 'python' and topic.lower() != 'python':
+        log_to_terminal(f"Aviso: Tópico '{topic}' não encontrado. A usar backup 'python'.")
+
+    constraints = {
+        'size': 3, 
+        'topic': search_topic, 
+        'max_mc': 3, 
+        'min_grammar': 0 
+    }
+    
+    solver = QuizCSP(st.session_state.POOL_ATUAL, constraints)
     quiz, stats = solver.solve()
     
-    if quiz:
-        log_to_terminal(f"CSP Sucesso! Passos: {stats['steps_explored']} | Tempo: {stats['time_seconds']:.6f}s")
+    if quiz: 
         return {"success": True, "data": quiz, "stats": stats, "type": "quiz_plan"}
     
-    log_to_terminal("CSP Falhou: Restrições impossíveis.")
-    return {"success": False, "msg": "Restrições impossíveis."}
-
-async def next_adversarial_move(ctx: str) -> str:
-    log_to_terminal("Iniciando Algoritmo Minimax (Adversarial Search)...")
+    solver = QuizCSP(st.session_state.POOL_ATUAL, {'size': 1, 'topic': search_topic})
+    quiz, stats = solver.solve()
+    if quiz: 
+        return {"success": True, "data": quiz, "stats": stats, "type": "quiz_plan"}
     
-    game = InterviewGame(QUESTION_POOL, [101]) 
-    best_q, stats = game.get_best_next_question()
-    
-    if best_q:
-        log_to_terminal(f"Minimax Sucesso! Nós visitados: {stats['nodes_visited']} | Decisão: ID {best_q['id']}")
-        return {"success": True, "data": [best_q], "stats": stats, "type": "interview_step"}
-    
-    log_to_terminal("Minimax Falhou: Sem perguntas.")
     return {"success": False}
 
-# ==============================================================================
-# 5. ROUTER HÍBRIDO
-# ==============================================================================
+async def next_adversarial_move(topic: str, history: list) -> dict: 
+  
+    if not history:
+        await fetch_new_questions(topic)
+    
+    full_pool = st.session_state.POOL_ATUAL
+    topic_pool = [q for q in full_pool if topic.lower() in q['topic'].lower()]
+ 
+    if not topic_pool:
+        topic_pool = [q for q in full_pool if 'python' in q['topic'].lower()]
+        log_to_terminal(f"Aviso: Não há perguntas de '{topic}'. Usando backup (Python).")
+
+    game = InterviewGame(topic_pool, history) 
+    best_q, stats = game.get_best_next_question()
+    
+    if best_q: 
+        return {"success": True, "data": [best_q], "stats": stats, "type": "interview_step"}
+    
+    return {"success": False}
 
 async def agent_router(user_input):
-    log_to_terminal(f"Recebido Input do Usuário: '{user_input}'")
-    client = OpenAIChatCompletionClient(**CLIENT_CONFIG)
+    log_to_terminal(f"Input: {user_input}")
     
-    router_agent = AssistantAgent(
-        name="WiseIn",
-        model_client=client,
-        system_message="Você é o WiseIn. Se o usuário pedir 'Quiz', 'Entrevista' ou 'Notícias', confirme a ação em uma frase curta."
-    )
+    clean_input = user_input.lower().replace("?", "").replace("!", "").replace(".", "")
+    
+    stopwords = [
+        "quero", "um", "uma", "quiz", "sobre", "de", "do", "da", "em", "para", 
+        "plano", "entrevista", "teste", "gerar", "criar", "fazer", "agora", "rápido"
+    ]
+    words = clean_input.split()
+    potential_topics = [w for w in words if w not in stopwords]
 
+    if potential_topics:
+        topic = potential_topics[-1] 
+    else:
+        topic = "General Tech" #Se o user digitar só "Quero um quiz" e mais nada
+
+    if len(topic) > 3: 
+        topic = topic.capitalize()
+    else:
+        topic = topic.upper()
+
+    log_to_terminal(f"Tópico detetado: '{topic}'")
+            
+    client = OpenAIChatCompletionClient(**CLIENT_CONFIG)
+    router_agent = AssistantAgent(name="WiseIn", model_client=client, system_message="Seja breve.")
+    
     api_response = None
-    failover_mode = False
-
-    # 1. TENTA A API
     try:
-        log_to_terminal("Tentando contactar API LLM (Llama 3)...")
         result = await router_agent.run(task=user_input)
         api_response = result.messages[-1].content
-        log_to_terminal("Resposta da API recebida com sucesso.")
-    except Exception as e:
-        log_to_terminal(f"ALERTA: API Falhou ({str(e)}). Ativando Failover Local.")
-        failover_mode = True 
+    except:
+        pass 
     
-    # 2. EXECUTA A LÓGICA
     tool_result = None
-    if "quiz" in user_input.lower():
-        tool_result = await generate_quiz_plan(user_input)
+    if "quiz" in user_input.lower() or "plano" in user_input.lower():
+        tool_result = await generate_quiz_plan(topic)
     elif "entrevista" in user_input.lower():
-        tool_result = await next_adversarial_move(user_input)
+        tool_result = await next_adversarial_move(topic, [])
     
-    return api_response, tool_result, failover_mode
+    return api_response, tool_result, False, topic
 
-# ==============================================================================
-# 6. UI
-# ==============================================================================
 
 def main():
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
-        else:
-            st.title("WISEIN")
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+        else: st.title("WISEIN")
 
     with st.sidebar:
         st.caption("Painel de Controle")
         st.success("Sistema Online")
-        st.markdown("---")
-        if st.button("Reiniciar Sessão", type="primary", use_container_width=True):
+        if st.button("Reiniciar", type="primary", use_container_width=True):
             st.session_state.messages = []
             st.session_state.active_session = None
-            st.session_state.q_queue = []
-            st.session_state.q_index = 0
+            st.session_state.active_mode = None 
+            st.session_state.history_ids = []  
+            st.session_state.current_topic = None
             st.rerun()
-        st.markdown("---")
+        st.caption("WiseIn Tech Tutor")
 
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Olá! Sou o seu tutor técnico **WiseIn**. \n\nPosso gerar um plano de estudos personalizado ou simular uma entrevista técnica. Como quer começar?"}]
-    if "active_session" not in st.session_state:
+        st.session_state.messages = [{"role": "assistant", "content": "Olá! Posso gerar um **Quiz** ou **Entrevista**. Qual o tópico?"}]
+    if "active_session" not in st.session_state: 
         st.session_state.active_session = None 
-    if "q_queue" not in st.session_state:
+        st.session_state.active_mode = None
+        st.session_state.history_ids = []
+        st.session_state.current_topic = "python"
         st.session_state.q_queue = []
-    if "q_index" not in st.session_state:
         st.session_state.q_index = 0
 
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        with st.chat_message(msg["role"]): 
+            if '<div class="question-box">' in msg["content"]:
+                st.markdown(msg["content"], unsafe_allow_html=True)
+            else:
+                st.markdown(msg["content"])
 
-    if prompt := st.chat_input("Escreva aqui (ex: 'Quero um quiz de Python')..."):
+    if prompt := st.chat_input("Ex: Quero uma entrevista de Java..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        with st.chat_message("user"): st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            response_placeholder = st.empty()
+            placeholder = st.empty()
             
+
             if st.session_state.active_session:
                 current_q = st.session_state.q_queue[st.session_state.q_index]
-                db_data = MOCK_KNOWLEDGE_BASE.get(current_q['id'])
+                db_data = st.session_state.DB_PERGUNTAS.get(current_q['id'])
                 
                 if db_data:
-                    log_to_terminal(f"Processando resposta do utilizador para Q{current_q['id']}...")
                     correct = prompt.lower() in db_data['a'].lower()
-                    feedback = db_data['ok'] if correct else db_data['nok']
+                    feedback = db_data['ok'] if correct else f"{db_data['nok']} (Resp: **{db_data['a']}**)"
+                    st.markdown(feedback)
+                    st.session_state.messages.append({"role": "assistant", "content": feedback})
+                    st.session_state.history_ids.append(current_q['id'])
                     
-                    final_txt = f"{feedback}"
-                    st.session_state.q_index += 1
+                    should_continue = False
+                    next_q_data = None
                     
-                    if st.session_state.q_index < len(st.session_state.q_queue):
-                        next_q = st.session_state.q_queue[st.session_state.q_index]
-                        next_db = MOCK_KNOWLEDGE_BASE.get(next_q['id'])
+                    if st.session_state.active_mode == 'quiz':
+                        st.session_state.q_index += 1
+                        if st.session_state.q_index < len(st.session_state.q_queue):
+                            next_q_data = st.session_state.q_queue[st.session_state.q_index]
+                            should_continue = True
+                            
+                    elif st.session_state.active_mode == 'interview':
+                        if len(st.session_state.history_ids) < 5: 
+                            with st.spinner("Calculando melhor jogada..."):
+                                res = asyncio.run(next_adversarial_move(st.session_state.current_topic, st.session_state.history_ids))
+                                if res['success']:
+                                    next_q_data = res['data'][0] 
+                                    st.session_state.q_queue = [next_q_data]
+                                    st.session_state.q_index = 0
+                                    should_continue = True
+                    
+                    if should_continue and next_q_data:
+                        next_db = st.session_state.DB_PERGUNTAS.get(next_q_data['id'])
                         if next_db:
-                            final_txt += f"\n\n---\n**Próxima Pergunta:** {next_db['q']}"
+                            time.sleep(0.5)
+                            prefixo = f"Pergunta {len(st.session_state.history_ids) + 1}"
+                            q_display = f"""<div class="question-box">{prefixo}: {next_db['q']}</div>"""
+                            st.markdown(q_display, unsafe_allow_html=True)
+                            st.session_state.messages.append({"role": "assistant", "content": q_display})
+                        else:
+                            st.error("Erro dados.")
                     else:
-                        final_txt += "\n\n **Parabéns! Sessão concluída.**"
+                        end_msg = "**Sessão Terminada!**"
+                        st.markdown(end_msg)
+                        st.session_state.messages.append({"role": "assistant", "content": end_msg})
                         st.session_state.active_session = None
-                        log_to_terminal("Sessão de Quiz concluída.")
-                    
-                    response_placeholder.markdown(final_txt)
-                    st.session_state.messages.append({"role": "assistant", "content": final_txt})
-                else:
-                    st.error("Erro interno.")
-
+            
             else:
-                with st.spinner("Processando..."):
-                    api_text, logic_result, failover = asyncio.run(agent_router(prompt))
+                with st.spinner("A iniciar agentes..."):
+                    api_txt, res, fail, topic_detected = asyncio.run(agent_router(prompt))
                 
-                display_text = ""
-                
-                if not failover and api_text:
-                    display_text += f"{api_text}\n\n"
-                elif failover:
-                    display_text += f"⚙️ *Modo Offline Ativado.*\n\n"
-
-                if logic_result and logic_result['success']:
-                    st.session_state.q_queue = logic_result['data']
-                    st.session_state.active_session = 'quiz'
+                if res and res['success']:
+                    st.session_state.q_queue = res['data']
+                    st.session_state.active_session = True
+                    st.session_state.current_topic = topic_detected
                     st.session_state.q_index = 0
+                    st.session_state.history_ids = []
                     
-                    first_id = logic_result['data'][0]['id']
-                    first_db = MOCK_KNOWLEDGE_BASE.get(first_id)
-                    stats = logic_result['stats']
+                    st.session_state.active_mode = 'quiz' if res['type'] == 'quiz_plan' else 'interview'
                     
-                    if first_db:
-                        display_text += f"**Plano Gerado com Sucesso**\n"
-                        display_text += f"_Análise concluída em {stats['time_seconds']:.4f}s._\n\n"
-                        display_text += f"---\n**Pergunta 1:** {first_db['q']}"
+                    first = res['data'][0]
+                    first_txt = st.session_state.DB_PERGUNTAS[first['id']]['q']
+                    stats = res['stats']
+                    
+                    # Intro
+                    intro_html = ""
+                    if st.session_state.active_mode == 'quiz':
+                        intro_html = f"<b>Plano Gerado</b> <span class='algo-tag'>{stats.get('steps_explored',0)} passos</span><br><br>"
+                    else:
+                        intro_html = f"<b>Entrevista Iniciada</b> <span class='algo-tag'>{stats.get('nodes_visited',0)} nós</span><br><br>"
+                    
+                    q_display = f"""{intro_html}<div class="question-box">Pergunta 1: {first_txt}</div>"""
+                    st.markdown(q_display, unsafe_allow_html=True)
+                    st.session_state.messages.append({"role": "assistant", "content": q_display})
                     
                 else:
-                    display_text += "Não consegui gerar um plano para esse tópico. Tente 'Python' ou 'AWS'."
-
-                response_placeholder.markdown(display_text)
-                st.session_state.messages.append({"role": "assistant", "content": display_text})
+                    err_msg = "Não consegui iniciar. Tente 'Quiz de Python' ou 'Entrevista AWS'."
+                    st.markdown(err_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
 
 if __name__ == "__main__":
     main()

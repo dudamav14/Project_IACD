@@ -1,5 +1,4 @@
 # Project_IACD
-API: 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
 INSTRUÇÕES DE EXECUÇÃO - PROJETO WISEIN
 
 1. Requisitos:
@@ -21,6 +20,9 @@ INSTRUÇÕES DE EXECUÇÃO - PROJETO WISEIN
    - Nós visitados pelo algoritmo Minimax.
 
 5. Notas sobre a API:
-   O projeto utiliza uma chave gratuita do OpenRouter. Se houver falha na conexão (Erro 429),
+   O projeto utiliza uma chave paga do OpenRouter. Obtenha a chave no relatório disponibilizado
+   e insire na 'linha 56' do arquivo app_ui.py. 
+   
+   Se houver falha na conexão (Erro 429),
    o sistema ativará automaticamente o modo 'Failover', garantindo que os algoritmos locais
    continuam a funcionar.
