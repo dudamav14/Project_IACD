@@ -53,7 +53,7 @@ except ImportError:
     st.error("Erro: Pasta de lógica não encontrada.")
     st.stop()
 
-OPENROUTER_API_KEY = "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" # <--- INSERE A CHAVE AQUI
+OPENROUTER_API_KEY = " " # <--- INSERE A CHAVE AQUI
 
 CLIENT_CONFIG = {
     "model": "openai/gpt-4o-mini",
