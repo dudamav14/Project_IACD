@@ -186,11 +186,23 @@ async def generate_quiz_plan(topic: str) -> str:
     quiz, stats = solver.solve()
     
     if quiz: 
+        print(f"\n[METRICAS - CSP (BACKTRACKING)]")
+        print(f"   ├── Status: Sucesso (Restrições Rígidas)")
+        print(f"   ├── Tópico: {search_topic}")
+        print(f"   ├── Espaço de Busca Exploradodo: {stats['steps_explored']} passos")
+        print(f"   └── Tempo de Computação: {stats['time_seconds']:.6f} segundos")
+        print("-" * 50)
         return {"success": True, "data": quiz, "stats": stats, "type": "quiz_plan"}
     
     solver = QuizCSP(st.session_state.POOL_ATUAL, {'size': 1, 'topic': search_topic})
     quiz, stats = solver.solve()
     if quiz: 
+        print(f"\n[METRICAS - CSP (BACKTRACKING)]")
+        print(f"   ├── Status: Sucesso (Restrições Rígidas)")
+        print(f"   ├── Tópico: {search_topic}")
+        print(f"   ├── Espaço de Busca Exploradodo: {stats['steps_explored']} passos")
+        print(f"   └── Tempo de Computação: {stats['time_seconds']:.6f} segundos")
+        print("-" * 50)
         return {"success": True, "data": quiz, "stats": stats, "type": "quiz_plan"}
     
     return {"success": False}
@@ -211,6 +223,12 @@ async def next_adversarial_move(topic: str, history: list) -> dict:
     best_q, stats = game.get_best_next_question()
     
     if best_q: 
+        print(f"\n[METRICAS - ADVERSARIAL (MINIMAX)]")
+        print(f"   ├── Estratégia: Maximizar Dificuldade vs Performance")
+        print(f"   ├── Nós da Árvore Visitados: {stats['nodes_visited']}")
+        print(f"   ├── Decisão Ótima ID: {best_q['id']} (Nível: {best_q['level']})")
+        print(f"   └── Tempo de Decisão: {stats['time_seconds']:.6f} segundos")
+        print("-" * 50)
         return {"success": True, "data": [best_q], "stats": stats, "type": "interview_step"}
     
     return {"success": False}
