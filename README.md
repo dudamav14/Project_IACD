@@ -14,13 +14,12 @@ Instale as dependências necessárias executando:
 pip install -r requirements.txt
 
 3. Configuração da API Key (Importante)
-O projeto requer uma chave de API do OpenRouter para ativar a inteligência dos agentes. **Use nossa chave!** nosso projeto requer um volume alto de requests e a chave gratuita não é suficiente para isso.
-
+O projeto requer uma chave de API do OpenRouter para ativar a inteligência dos agentes. 
 1-Abra o arquivo app_ui.py num editor de texto ou IDE.
 
 2-Procure pela variável OPENROUTER_API_KEY (localizada na linha 56).
 
-3-Substitua o valor existente pela chave fornecida: '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'
+3-Substitua o valor existente pela chave criada no Open Router.
 
 4-Salve o arquivo.
 
